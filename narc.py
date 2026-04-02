@@ -5,7 +5,7 @@ import random
 import time
 import cv2
 import mediapipe as mp
-from actions import dim_screen, restore_screen, mouse_jitter, shame_user
+from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame
 
 # ── Constants ────────────────────────────────────────────────────────────────
 DECAY_INTERVAL   = 60      # seconds between score drops
@@ -13,6 +13,7 @@ DECAY_AMOUNT     = 2       # points lost per interval
 SIP_HOLD_TIME    = 1.5     # seconds hand must stay near mouth to count as sip
 SIP_THRESHOLD    = 0.12    # normalized distance (hand tip → mouth) for a sip
 PUNISH_THRESHOLD = 60      # score at which punishments begin
+NUCLEAR_DELAY    = 60      # seconds at score=0 before sleep
 
 INSULTS = [
     "Absolutely pathetic. A cactus has better self-discipline than you.",
@@ -40,10 +41,13 @@ def _distance(a: tuple, b: tuple) -> float:
 # ── Health score ──────────────────────────────────────────────────────────────
 class HealthScore:
     def __init__(self):
-        self.score          = 100
-        self._last_decay    = time.time()
-        self._warned_75     = False
-        self._warned_40     = False
+        self.score           = 100
+        self._last_decay     = time.time()
+        self._warned_75      = False
+        self._warned_40      = False
+        self._zero_since: float | None = None
+        self._social_shamed  = False
+        self._nuked          = False
 
     def tick(self) -> int:
         now = time.time()
@@ -51,6 +55,25 @@ class HealthScore:
             self.score       = max(0, self.score - DECAY_AMOUNT)
             self._last_decay = now
             self._check_warnings()
+
+        # Track time spent at zero
+        if self.score == 0:
+            if self._zero_since is None:
+                self._zero_since = time.time()
+                if not self._social_shamed:
+                    shame_user(
+                        "Im telling your coworkers youre dying of thirst. Goodnight."
+                    )
+                    social_shame()
+                    self._social_shamed = True
+            elif not self._nuked and (time.time() - self._zero_since) >= NUCLEAR_DELAY:
+                self._nuked = True
+                nuclear_penalty()
+        else:
+            self._zero_since    = None
+            self._social_shamed = False
+            self._nuked         = False
+
         return self.score
 
     def _check_warnings(self):
@@ -62,9 +85,12 @@ class HealthScore:
             self._warned_40 = True
 
     def reset(self):
-        self.score      = 100
-        self._warned_75 = False
-        self._warned_40 = False
+        self.score           = 100
+        self._warned_75      = False
+        self._warned_40      = False
+        self._zero_since     = None
+        self._social_shamed  = False
+        self._nuked          = False
         print("[narc] Sip detected — health reset to 100.")
 
     def apply_punishment(self):

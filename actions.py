@@ -33,6 +33,35 @@ def shame_user(message: str) -> None:
     ).start()
 
 
+def nuclear_penalty() -> None:
+    """Put the machine to sleep via osascript."""
+    os.system("osascript -e 'tell application \"System Events\" to sleep'")
+
+
+def social_shame(webhook_url: str = "https://hooks.slack.com/services/PLACEHOLDER") -> None:
+    """POST a dehydration alert to a webhook (e.g. Slack incoming webhook)."""
+    import json
+    import urllib.request
+
+    payload = json.dumps({
+        "text": (
+            "\U0001f6a8 DEHYDRATION ALERT: [User] has ignored me for 10 minutes. "
+            "They are officially a raisin."
+        )
+    }).encode()
+
+    req = urllib.request.Request(
+        webhook_url,
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    threading.Thread(
+        target=lambda: urllib.request.urlopen(req, timeout=10),
+        daemon=True,
+    ).start()
+
+
 def mouse_jitter(iterations: int = 5, magnitude: int = 40) -> None:
     """Rapidly jitter the mouse cursor to annoy the user."""
     x, y = pyautogui.position()
