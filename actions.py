@@ -62,6 +62,29 @@ def social_shame(webhook_url: str = "https://hooks.slack.com/services/PLACEHOLDE
     ).start()
 
 
+_HOSTAGE_APPS = {"Spotify", "Discord", "YouTube"}
+
+
+def take_hostage(health_score: int) -> None:
+    """Hide a fun app if health is critically low."""
+    if health_score >= 30:
+        return
+    get_app = (
+        'tell application "System Events" to get name of first process '
+        'whose frontmost is true'
+    )
+    result = subprocess.run(
+        ["osascript", "-e", get_app], capture_output=True, text=True
+    )
+    app = result.stdout.strip()
+    if app in _HOSTAGE_APPS:
+        subprocess.run(
+            ["osascript", "-e", f'tell application "{app}" to set visible to false'],
+            check=False,
+        )
+        shame_user("No music for raisins. Drink up.")
+
+
 def mouse_jitter(iterations: int = 5, magnitude: int = 40) -> None:
     """Rapidly jitter the mouse cursor to annoy the user."""
     x, y = pyautogui.position()

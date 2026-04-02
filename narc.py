@@ -5,7 +5,7 @@ import random
 import time
 import cv2
 import mediapipe as mp
-from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame
+from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame, take_hostage
 
 # ── Constants ────────────────────────────────────────────────────────────────
 DECAY_INTERVAL   = 60      # seconds between score drops
@@ -14,6 +14,8 @@ SIP_HOLD_TIME    = 1.5     # seconds hand must stay near mouth to count as sip
 SIP_THRESHOLD    = 0.12    # normalized distance (hand tip → mouth) for a sip
 PUNISH_THRESHOLD = 60      # score at which punishments begin
 NUCLEAR_DELAY    = 60      # seconds at score=0 before sleep
+RICKROLL_WINDOW  = 30      # seconds after wake with no sip → rickroll
+SMILE_THRESHOLD  = 0.28    # mouth-corner spread / face-width ratio to count as smile
 
 INSULTS = [
     "Absolutely pathetic. A cactus has better self-discipline than you.",
@@ -38,16 +40,41 @@ def _distance(a: tuple, b: tuple) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
+def _is_smiling(face_results, w: int, h: int) -> bool:
+    """True if mouth-corner spread exceeds SMILE_THRESHOLD * face width.
+
+    FaceMesh landmarks:
+      61  = left mouth corner
+      291 = right mouth corner
+      234 = left cheek (face width reference)
+      454 = right cheek
+    """
+    if not face_results.multi_face_landmarks:
+        return False
+    lm = face_results.multi_face_landmarks[0].landmark
+    left_corner  = _landmark_xy(lm[61],  w, h)
+    right_corner = _landmark_xy(lm[291], w, h)
+    left_cheek   = _landmark_xy(lm[234], w, h)
+    right_cheek  = _landmark_xy(lm[454], w, h)
+    mouth_width  = _distance(left_corner, right_corner)
+    face_width   = _distance(left_cheek,  right_cheek)
+    if face_width == 0:
+        return False
+    return (mouth_width / face_width) >= SMILE_THRESHOLD
+
+
 # ── Health score ──────────────────────────────────────────────────────────────
 class HealthScore:
     def __init__(self):
-        self.score           = 100
-        self._last_decay     = time.time()
-        self._warned_75      = False
-        self._warned_40      = False
-        self._zero_since: float | None = None
-        self._social_shamed  = False
-        self._nuked          = False
+        self.score                      = 100
+        self._last_decay                = time.time()
+        self._warned_75                 = False
+        self._warned_40                 = False
+        self._zero_since: float | None  = None
+        self._social_shamed             = False
+        self._nuked                     = False
+        self._woke_at: float | None     = None   # time machine woke after nuke
+        self._rickrolled                = False
 
     def tick(self) -> int:
         now = time.time()
@@ -56,47 +83,62 @@ class HealthScore:
             self._last_decay = now
             self._check_warnings()
 
-        # Track time spent at zero
+        # Track time spent at zero → social shame → nuclear
         if self.score == 0:
             if self._zero_since is None:
-                self._zero_since = time.time()
+                self._zero_since = now
                 if not self._social_shamed:
                     shame_user(
                         "Im telling your coworkers youre dying of thirst. Goodnight."
                     )
                     social_shame()
                     self._social_shamed = True
-            elif not self._nuked and (time.time() - self._zero_since) >= NUCLEAR_DELAY:
-                self._nuked = True
+            elif not self._nuked and (now - self._zero_since) >= NUCLEAR_DELAY:
+                self._nuked  = True
+                self._woke_at = None  # will be set when we detect the wake
                 nuclear_penalty()
+                # After sleep returns (machine woke), start the rickroll clock
+                self._woke_at = time.time()
         else:
             self._zero_since    = None
             self._social_shamed = False
             self._nuked         = False
 
+        # Post-nuclear rickroll window
+        if self._woke_at and not self._rickrolled:
+            if now - self._woke_at >= RICKROLL_WINDOW:
+                self._rickrolled = True
+                os.system("open 'https://www.youtube.com/watch?v=dQw4w9WgXcQ'")
+
         return self.score
 
     def _check_warnings(self):
         if not self._warned_75 and self.score <= 75:
-            shame_user("I see you getting thirsty. Don't make me dim the lights.")
+            shame_user("I see you getting thirsty. Dont make me dim the lights.")
             self._warned_75 = True
         if not self._warned_40 and self.score <= 40:
             shame_user("This is your final warning. Drink now or lose your mouse.")
             self._warned_40 = True
 
-    def reset(self):
-        self.score           = 100
+    def reset(self, full: bool = True) -> None:
+        target = 100 if full else max(self.score, 50)
+        if not full and self.score < 50:
+            shame_user("You look miserable. Smile while you drink or it doesnt count.")
+        self.score           = target
         self._warned_75      = False
         self._warned_40      = False
         self._zero_since     = None
         self._social_shamed  = False
         self._nuked          = False
-        print("[narc] Sip detected — health reset to 100.")
+        self._woke_at        = None
+        self._rickrolled     = False
+        print(f"[narc] Sip registered — health {'reset to 100' if full else f'recovered to {target} (grumpy penalty)'}.")
 
     def apply_punishment(self):
         if self.score <= PUNISH_THRESHOLD:
             print(f"[narc] Score {self.score} — punishing!")
             shame_user(random.choice(INSULTS))
+            take_hostage(self.score)
             dim_screen(brightness=0.2)
             mouse_jitter()
             time.sleep(0.5)
@@ -169,11 +211,12 @@ def run():
             hand_res = hands.process(rgb)
             face_res = face_mesh.process(rgb)
 
-            near = _is_hand_near_mouth(hand_res, face_res, w, h)
+            near    = _is_hand_near_mouth(hand_res, face_res, w, h)
+            smiling = _is_smiling(face_res, w, h)
 
             if sip.update(near):
-                health.reset()
                 os.system("afplay /System/Library/Sounds/Glass.aiff &")
+                health.reset(full=smiling)
 
             score = health.tick()
             health.apply_punishment()
@@ -183,8 +226,9 @@ def run():
             cv2.putText(frame, f"Health: {score}", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
             if near:
-                cv2.putText(frame, "SIP DETECTED", (20, 80),
-                            cv2.FONT_HERSHEY_SIMPLEX, 0.8, (255, 255, 0), 2)
+                label = "SIP + SMILE :)" if smiling else "SIP (no smile — 50% recovery)"
+                cv2.putText(frame, label, (20, 80),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
             cv2.imshow("Hydration Narc", frame)
             if cv2.waitKey(1) & 0xFF == ord("q"):
