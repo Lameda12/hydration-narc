@@ -5,6 +5,7 @@ import subprocess
 import random
 import threading
 import pyautogui
+from pynput import keyboard as _kb
 
 pyautogui.FAILSAFE = True
 
@@ -63,6 +64,37 @@ def social_shame(webhook_url: str = "https://hooks.slack.com/services/PLACEHOLDE
 
 
 _HOSTAGE_APPS = {"Spotify", "Discord", "YouTube"}
+
+# ── Keyboard lockdown ─────────────────────────────────────────────────────────
+_kb_listener: _kb.Listener | None = None
+_kb_lock = threading.Lock()
+
+
+def lock_keyboard() -> None:
+    """Suppress all keyboard input until unlock_keyboard() is called."""
+    global _kb_listener
+    with _kb_lock:
+        if _kb_listener is not None:
+            return  # already locked
+        shame_user(
+            "Your words are worthless. Only water matters now. Keyboard privileges revoked."
+        )
+        _kb_listener = _kb.Listener(
+            suppress=True,
+            on_press=lambda key: None,
+            on_release=lambda key: None,
+        )
+        _kb_listener.start()
+
+
+def unlock_keyboard() -> None:
+    """Restore keyboard input."""
+    global _kb_listener
+    with _kb_lock:
+        if _kb_listener is None:
+            return
+        _kb_listener.stop()
+        _kb_listener = None
 
 
 def take_hostage(health_score: int) -> None:

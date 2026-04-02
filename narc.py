@@ -5,7 +5,8 @@ import random
 import time
 import cv2
 import mediapipe as mp
-from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame, take_hostage
+from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame, take_hostage, lock_keyboard, unlock_keyboard
+from ledger import log_sip, log_mortal_sin
 
 # ── Constants ────────────────────────────────────────────────────────────────
 DECAY_INTERVAL   = 60      # seconds between score drops
@@ -16,6 +17,7 @@ PUNISH_THRESHOLD = 60      # score at which punishments begin
 NUCLEAR_DELAY    = 60      # seconds at score=0 before sleep
 RICKROLL_WINDOW  = 30      # seconds after wake with no sip → rickroll
 SMILE_THRESHOLD  = 0.28    # mouth-corner spread / face-width ratio to count as smile
+LOCKDOWN_THRESHOLD = 15    # score at which keyboard is seized
 
 INSULTS = [
     "Absolutely pathetic. A cactus has better self-discipline than you.",
@@ -40,8 +42,8 @@ def _distance(a: tuple, b: tuple) -> float:
     return ((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2) ** 0.5
 
 
-def _is_smiling(face_results, w: int, h: int) -> bool:
-    """True if mouth-corner spread exceeds SMILE_THRESHOLD * face width.
+def _smile_intensity(face_results, w: int, h: int) -> float:
+    """Return mouth-corner / face-width ratio (0.0 if no face detected).
 
     FaceMesh landmarks:
       61  = left mouth corner
@@ -50,17 +52,20 @@ def _is_smiling(face_results, w: int, h: int) -> bool:
       454 = right cheek
     """
     if not face_results.multi_face_landmarks:
-        return False
+        return 0.0
     lm = face_results.multi_face_landmarks[0].landmark
     left_corner  = _landmark_xy(lm[61],  w, h)
     right_corner = _landmark_xy(lm[291], w, h)
     left_cheek   = _landmark_xy(lm[234], w, h)
     right_cheek  = _landmark_xy(lm[454], w, h)
-    mouth_width  = _distance(left_corner, right_corner)
-    face_width   = _distance(left_cheek,  right_cheek)
+    face_width   = _distance(left_cheek, right_cheek)
     if face_width == 0:
-        return False
-    return (mouth_width / face_width) >= SMILE_THRESHOLD
+        return 0.0
+    return _distance(left_corner, right_corner) / face_width
+
+
+def _is_smiling(face_results, w: int, h: int) -> bool:
+    return _smile_intensity(face_results, w, h) >= SMILE_THRESHOLD
 
 
 # ── Health score ──────────────────────────────────────────────────────────────
@@ -83,6 +88,10 @@ class HealthScore:
             self._last_decay = now
             self._check_warnings()
 
+        # Keyboard lockdown at critical health
+        if self.score <= LOCKDOWN_THRESHOLD:
+            lock_keyboard()
+
         # Track time spent at zero → social shame → nuclear
         if self.score == 0:
             if self._zero_since is None:
@@ -94,8 +103,9 @@ class HealthScore:
                     social_shame()
                     self._social_shamed = True
             elif not self._nuked and (now - self._zero_since) >= NUCLEAR_DELAY:
-                self._nuked  = True
-                self._woke_at = None  # will be set when we detect the wake
+                self._nuked   = True
+                self._woke_at = None
+                log_mortal_sin()
                 nuclear_penalty()
                 # After sleep returns (machine woke), start the rickroll clock
                 self._woke_at = time.time()
@@ -120,10 +130,13 @@ class HealthScore:
             shame_user("This is your final warning. Drink now or lose your mouse.")
             self._warned_40 = True
 
-    def reset(self, full: bool = True) -> None:
+    def reset(self, smile_intensity: float) -> None:
+        full   = smile_intensity >= SMILE_THRESHOLD
         target = 100 if full else max(self.score, 50)
         if not full and self.score < 50:
             shame_user("You look miserable. Smile while you drink or it doesnt count.")
+        log_sip(smile_intensity, full)
+        unlock_keyboard()
         self.score           = target
         self._warned_75      = False
         self._warned_40      = False
@@ -211,12 +224,13 @@ def run():
             hand_res = hands.process(rgb)
             face_res = face_mesh.process(rgb)
 
-            near    = _is_hand_near_mouth(hand_res, face_res, w, h)
-            smiling = _is_smiling(face_res, w, h)
+            near      = _is_hand_near_mouth(hand_res, face_res, w, h)
+            intensity = _smile_intensity(face_res, w, h)
+            smiling   = intensity >= SMILE_THRESHOLD
 
             if sip.update(near):
                 os.system("afplay /System/Library/Sounds/Glass.aiff &")
-                health.reset(full=smiling)
+                health.reset(smile_intensity=intensity)
 
             score = health.tick()
             health.apply_punishment()
@@ -225,9 +239,14 @@ def run():
             color = (0, 200, 0) if score > 60 else (0, 100, 255)
             cv2.putText(frame, f"Health: {score}", (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX, 1.2, color, 2)
+            cv2.putText(frame, f"Smile: {intensity:.2f}", (20, 80),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.6, (200, 200, 200), 1)
+            if score <= LOCKDOWN_THRESHOLD:
+                cv2.putText(frame, "KEYBOARD LOCKED", (20, 110),
+                            cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 0, 255), 2)
             if near:
                 label = "SIP + SMILE :)" if smiling else "SIP (no smile — 50% recovery)"
-                cv2.putText(frame, label, (20, 80),
+                cv2.putText(frame, label, (20, 140),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.7, (255, 255, 0), 2)
 
             cv2.imshow("Hydration Narc", frame)
