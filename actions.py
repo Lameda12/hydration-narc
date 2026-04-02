@@ -117,6 +117,13 @@ def take_hostage(health_score: int) -> None:
         shame_user("No music for raisins. Drink up.")
 
 
+def post_to_x(message: str) -> None:
+    """Open a browser to x.com/intent/tweet so the user must manually post their confession."""
+    import urllib.parse
+    url = "https://x.com/intent/tweet?text=" + urllib.parse.quote(message)
+    os.system(f"open '{url}'")
+
+
 def mouse_jitter(iterations: int = 5, magnitude: int = 40) -> None:
     """Rapidly jitter the mouse cursor to annoy the user."""
     x, y = pyautogui.position()

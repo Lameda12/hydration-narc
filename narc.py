@@ -106,6 +106,7 @@ class HealthScore:
                 self._nuked   = True
                 self._woke_at = None
                 log_mortal_sin()
+                shame_user("Your failure has been recorded. The ledger does not lie.")
                 nuclear_penalty()
                 # After sleep returns (machine woke), start the rickroll clock
                 self._woke_at = time.time()
