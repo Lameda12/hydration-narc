@@ -1,7 +1,28 @@
 # The Hydration Narc™
 ### *Drink water. Smile about it. Or face consequences.*
 
+<video src="media/narc_trailer.mp4" controls width="100%"></video>
+
 > **IMPORTANT LEGAL NOTICE:** By running `start.sh`, you acknowledge that you have read, understood, and emotionally accepted this document. The Hydration Narc™ is not responsible for lost productivity, dimmed screens, hidden Spotify sessions, involuntary rickrolls, or the slow erosion of your sense of personal autonomy. Hydration is non-negotiable. Happiness is now also non-negotiable.
+
+---
+
+## The Manifesto
+
+The trailer above was built using **[Remotion](https://remotion.dev)** — a framework for creating videos programmatically in React — in a single session of what the industry is calling "Vibe Coding."
+
+No timeline editor was opened. No keyframes were dragged. The entire 30-second production — five scenes, a cracking health bar, an animated Mortal Sins registry, a nuclear failure sequence, and four voice lines recorded live from the macOS `say` command — was written as TypeScript and rendered to MP4 at the command line.
+
+The voiceover is Daniel. It is always Daniel.
+
+**The stack:**
+- `Remotion 4` — composition, sequencing, interpolation
+- `MediaPipe Face Mesh` — smile detection (the Narc watches the trailer too)
+- `macOS say -v Daniel` — voice synthesis, converted to MP3 via `ffmpeg`
+- `<Sequence from={N}>` — frame-accurate audio placement
+- `osascript` — everything else
+
+The trailer was vibe coded. The Narc was not. The Narc was built with intent, conviction, and a specific contempt for people who don't drink enough water.
 
 ---
 

@@ -1,0 +1,22 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+.python-version
+
+# Narc runtime files
+.narc.pid
+narc.log
+ledger.json
+
+# Env
+.env
+.env*.local
+
+# Remotion
+trailer/node_modules/
+trailer/out/
+trailer/.cache/
+
+# macOS
+.DS_Store
