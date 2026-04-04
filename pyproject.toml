@@ -2,6 +2,7 @@
 name = "hydration-narc"
 version = "0.2.0"
 description = "Vision-based macOS hydration enforcer (MediaPipe + threat automation)."
+readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mediapipe>=0.10.14",
