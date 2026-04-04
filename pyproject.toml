@@ -8,5 +8,6 @@ dependencies = [
     "mediapipe>=0.10.33",
     "opencv-python>=4.13.0.92",
     "pyautogui>=0.9.54",
+    "pyinstaller>=6.19.0",
     "pynput>=1.8.1",
 ]

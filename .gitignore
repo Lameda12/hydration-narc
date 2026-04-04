@@ -1,8 +1,24 @@
+# Next.js
+site/.next/
+site/node_modules/
+site/out/
+site/build
+site/.vercel
+site/*.tsbuildinfo
+site/next-env.d.ts
+
 # Python
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 .python-version
+venv/
+ENV/
+env/
+build/
+dist/
+*.spec
 
 # Narc runtime files
 .narc.pid
@@ -20,3 +36,6 @@ trailer/.cache/
 
 # macOS
 .DS_Store
+*.swp
+*.bak
+~*

@@ -1,12 +1,180 @@
 """The Hydration Narc — webcam-based hydration enforcer."""
 
 import os
+import sys
 import random
 import time
+import threading
+from pathlib import Path
+
 import cv2
 import mediapipe as mp
 from actions import dim_screen, restore_screen, mouse_jitter, shame_user, nuclear_penalty, social_shame, take_hostage, lock_keyboard, unlock_keyboard
 from ledger import log_sip, log_mortal_sin
+
+
+def _resource(relative: str) -> str:
+    """Resolve a bundled resource path (works both dev and PyInstaller)."""
+    base = getattr(sys, "_MEIPASS", Path(__file__).parent)
+    return str(Path(base) / relative)
+
+
+# ── License Guard ─────────────────────────────────────────────────────────────
+class LicenseGuard:
+    GUMROAD_PAGE  = "https://3961501605536.gumroad.com/l/aitng"
+    VERIFY_URL    = "https://api.gumroad.com/v2/licenses/verify"
+    PERMALINK     = "aitng"
+    _LICENSE_DIR  = Path.home() / "Library" / "Application Support" / "HydrationNarc"
+    _LICENSE_FILE = _LICENSE_DIR / "license.key"
+
+    # ── persistence ──────────────────────────────────────────────────────────
+    def _load_key(self) -> str:
+        try:
+            return self._LICENSE_FILE.read_text().strip()
+        except FileNotFoundError:
+            return ""
+
+    def _save_key(self, key: str) -> None:
+        self._LICENSE_DIR.mkdir(parents=True, exist_ok=True)
+        self._LICENSE_FILE.write_text(key.strip())
+
+    # ── Gumroad verification ──────────────────────────────────────────────────
+    def _verify_key(self, key: str) -> bool:
+        try:
+            import requests
+            r = requests.post(
+                self.VERIFY_URL,
+                data={"product_permalink": self.PERMALINK, "license_key": key},
+                timeout=10,
+            )
+            return r.json().get("success", False)
+        except Exception:
+            return False
+
+    # ── public entry point ────────────────────────────────────────────────────
+    def enforce(self) -> None:
+        """Block until a valid license is confirmed. No-ops if already licensed."""
+        key = self._load_key()
+        if key and self._verify_key(key):
+            return
+        self._show_paywall()
+
+    # ── Tkinter paywall modal ─────────────────────────────────────────────────
+    def _show_paywall(self) -> None:
+        import tkinter as tk
+
+        root = tk.Tk()
+        root.title("Hydration Narc")
+        root.configure(bg="#1c1c1e")
+        root.attributes("-fullscreen", True)
+        root.lift()
+        root.focus_force()
+
+        # ── icon ──────────────────────────────────────────────────────────────
+        try:
+            from PIL import Image, ImageTk
+            img   = Image.open(_resource("media/simple_icon.png")).resize((120, 120), Image.LANCZOS)
+            photo = ImageTk.PhotoImage(img)
+            lbl   = tk.Label(root, image=photo, bg="#1c1c1e")
+            lbl.image = photo
+            lbl.pack(pady=(120, 20))
+        except Exception:
+            pass
+
+        # ── headline ──────────────────────────────────────────────────────────
+        tk.Label(
+            root,
+            text="DANIEL: Access Denied.",
+            font=("Helvetica Neue", 28, "bold"),
+            fg="white",
+            bg="#1c1c1e",
+        ).pack(pady=(0, 8))
+
+        tk.Label(
+            root,
+            text="A $15 tribute is required for hydration rehabilitation.",
+            font=("Helvetica Neue", 16),
+            fg="#8e8e93",
+            bg="#1c1c1e",
+        ).pack(pady=(0, 40))
+
+        # ── buttons ───────────────────────────────────────────────────────────
+        btn_row = tk.Frame(root, bg="#1c1c1e")
+        btn_row.pack()
+
+        tk.Button(
+            btn_row,
+            text="Accept My Fate",
+            font=("Helvetica Neue", 14, "bold"),
+            bg="#2c2c2e", fg="white",
+            activebackground="#3a3a3c", activeforeground="white",
+            relief="flat", padx=24, pady=12, cursor="hand2",
+            command=lambda: os.system(f"open '{self.GUMROAD_PAGE}'"),
+        ).pack(side="left", padx=12)
+
+        activate_row = tk.Frame(root, bg="#1c1c1e")
+        status_var   = tk.StringVar()
+
+        def _show_activate():
+            activate_row.pack(pady=30)
+
+        tk.Button(
+            btn_row,
+            text="Activate",
+            font=("Helvetica Neue", 14),
+            bg="#0a84ff", fg="white",
+            activebackground="#0060d1", activeforeground="white",
+            relief="flat", padx=24, pady=12, cursor="hand2",
+            command=_show_activate,
+        ).pack(side="left", padx=12)
+
+        # ── activate row (shown on demand) ────────────────────────────────────
+        key_entry = tk.Entry(
+            activate_row,
+            font=("Courier", 13),
+            bg="#2c2c2e", fg="white",
+            insertbackground="white",
+            relief="flat", width=40,
+        )
+        key_entry.pack(side="left", padx=(0, 8), ipady=8)
+
+        def _verify():
+            key = key_entry.get().strip()
+            if not key:
+                status_var.set("Enter your license key.")
+                return
+            status_var.set("Verifying…")
+            root.update()
+
+            def _do_verify():
+                if self._verify_key(key):
+                    self._save_key(key)
+                    shame_user("Tribute accepted. Do not fail me again.")
+                    root.after(0, root.destroy)
+                else:
+                    root.after(0, lambda: status_var.set("Invalid key. Try again, raisin."))
+
+            threading.Thread(target=_do_verify, daemon=True).start()
+
+        tk.Button(
+            activate_row,
+            text="Verify",
+            font=("Helvetica Neue", 13),
+            bg="#30d158", fg="white",
+            activebackground="#20a040", activeforeground="white",
+            relief="flat", padx=16, pady=8, cursor="hand2",
+            command=_verify,
+        ).pack(side="left")
+
+        # ── status label ──────────────────────────────────────────────────────
+        tk.Label(
+            root,
+            textvariable=status_var,
+            font=("Helvetica Neue", 12),
+            fg="#ff453a", bg="#1c1c1e",
+        ).pack(pady=12)
+
+        root.mainloop()
 
 # ── Constants ────────────────────────────────────────────────────────────────
 DECAY_INTERVAL   = 60      # seconds between score drops
@@ -205,6 +373,8 @@ def _is_hand_near_mouth(
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 def run():
+    LicenseGuard().enforce()
+
     cap    = cv2.VideoCapture(0)
     health = HealthScore()
     sip    = SipDetector()
