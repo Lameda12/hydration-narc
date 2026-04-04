@@ -1,43 +1,7 @@
-# Next.js
-site/
-site/.next/
-site/node_modules/
-site/out/
-site/build
-site/.vercel
-site/*.tsbuildinfo
-site/next-env.d.ts
-
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
 .venv/
-.python-version
-venv/
-ENV/
-env/
-build/
-dist/
-*.spec
-
-# Narc runtime files
+__pycache__/
+*.pyc
 .narc.pid
 narc.log
 ledger.json
-
-# Env
-.env
-.env*.local
-
-# Remotion
-trailer/node_modules/
-trailer/out/
-trailer/.cache/
-
-# macOS
 .DS_Store
-*.swp
-*.bak
-~*
-site/Hydration-Narc-v1.dmg

@@ -5,11 +5,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PID_FILE="$SCRIPT_DIR/.narc.pid"
 LEDGER="$SCRIPT_DIR/ledger.json"
 
-# ── Mortal Sin gate ───────────────────────────────────────────────────────────
 if [[ -f "$LEDGER" ]]; then
-    TODAY="$(date -u +%Y-%m-%d)"
-    SINS="$(python3 - <<EOF
-import json, sys
+  TODAY="$(date -u +%Y-%m-%d)"
+  SINS="$(python3 - <<EOF
+import json
 with open("$LEDGER") as f:
     records = json.load(f)
 count = sum(
@@ -19,26 +18,23 @@ count = sum(
 print(count)
 EOF
 )"
-    if [[ "$SINS" -gt 3 ]]; then
-        echo "You haven't earned the right to stop. Keep drinking."
-        echo "(${SINS} Mortal Sins today. The threshold is 3. You need kill -9 if you're desperate.)"
-        exit 1
-    fi
+  if [[ "${SINS:-0}" -gt 3 ]]; then
+    echo "You have not earned the right to stop. (${SINS} mortal sins today; threshold is 3.)"
+    exit 1
+  fi
 fi
 
-# ── Normal shutdown ───────────────────────────────────────────────────────────
 if [[ ! -f "$PID_FILE" ]]; then
-    echo "No PID file found. Is the Narc running?"
-    exit 1
+  echo "No PID file. Is Hydration Narc running?"
+  exit 1
 fi
 
 PID="$(cat "$PID_FILE")"
-
 if kill -0 "$PID" 2>/dev/null; then
-    kill "$PID"
-    rm "$PID_FILE"
-    echo "Narc stopped (PID $PID). Coward."
+  kill "$PID"
+  rm "$PID_FILE"
+  echo "Hydration Narc stopped (PID $PID)."
 else
-    echo "Narc (PID $PID) was not running. Cleaning up."
-    rm "$PID_FILE"
+  echo "Process $PID not running; removing stale PID file."
+  rm "$PID_FILE"
 fi

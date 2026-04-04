@@ -1,134 +1,106 @@
-"""Punishment actions for the Hydration Narc."""
+"""Threat automation for Hydration Narc — TTS, AppleScript, Slack, and finale."""
 
+from __future__ import annotations
+
+import json
 import os
 import subprocess
-import random
 import threading
-import pyautogui
-from pynput import keyboard as _kb
+import urllib.request
+from pathlib import Path
 
-pyautogui.FAILSAFE = True
+# Set via env or edit for your Slack incoming webhook.
+SLACK_WEBHOOK_URL = os.environ.get(
+    "HYDRATION_NARC_SLACK_WEBHOOK",
+    "https://hooks.slack.com/services/PLACEHOLDER",
+)
 
+_REPO_ROOT = Path(__file__).resolve().parent
+SOUNDS_DIR = _REPO_ROOT / "sounds"
 
-def dim_screen(brightness: float = 0.3) -> None:
-    """Dim the screen via osascript. brightness is 0.0–1.0."""
-    value = int(brightness * 100)
-    script = f'tell application "System Events" to set brightness of display 1 to {value}'
-    subprocess.run(["osascript", "-e", script], check=False)
-
-
-def restore_screen(brightness: float = 0.8) -> None:
-    """Restore screen brightness."""
-    value = int(brightness * 100)
-    script = f'tell application "System Events" to set brightness of display 1 to {value}'
-    subprocess.run(["osascript", "-e", script], check=False)
+_RICKROLL_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
 
-def shame_user(message: str) -> None:
-    """Speak a shame message via macOS TTS in a background thread."""
-    # Sanitize: strip quotes so the shell interpolation can't be broken
+def _run_applescript(source: str) -> None:
+    subprocess.run(["osascript", "-e", source], check=False, capture_output=True)
+
+
+def warn_observed_daniel(message: str) -> None:
+    """Level 75 — audio warning via macOS `say` (Daniel voice)."""
     safe = message.replace('"', "").replace("'", "")
     threading.Thread(
-        target=lambda: os.system(f'say -v "Daniel" "{safe}"'),
-        daemon=True,
-    ).start()
-
-
-def nuclear_penalty() -> None:
-    """Put the machine to sleep via osascript."""
-    os.system("osascript -e 'tell application \"System Events\" to sleep'")
-
-
-def social_shame(webhook_url: str = "https://hooks.slack.com/services/PLACEHOLDER") -> None:
-    """POST a dehydration alert to a webhook (e.g. Slack incoming webhook)."""
-    import json
-    import urllib.request
-
-    payload = json.dumps({
-        "text": (
-            "\U0001f6a8 DEHYDRATION ALERT: [User] has ignored me for 10 minutes. "
-            "They are officially a raisin."
-        )
-    }).encode()
-
-    req = urllib.request.Request(
-        webhook_url,
-        data=payload,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
-    threading.Thread(
-        target=lambda: urllib.request.urlopen(req, timeout=10),
-        daemon=True,
-    ).start()
-
-
-_HOSTAGE_APPS = {"Spotify", "Discord", "YouTube"}
-
-# ── Keyboard lockdown ─────────────────────────────────────────────────────────
-_kb_listener: _kb.Listener | None = None
-_kb_lock = threading.Lock()
-
-
-def lock_keyboard() -> None:
-    """Suppress all keyboard input until unlock_keyboard() is called."""
-    global _kb_listener
-    with _kb_lock:
-        if _kb_listener is not None:
-            return  # already locked
-        shame_user(
-            "Your words are worthless. Only water matters now. Keyboard privileges revoked."
-        )
-        _kb_listener = _kb.Listener(
-            suppress=True,
-            on_press=lambda key: None,
-            on_release=lambda key: None,
-        )
-        _kb_listener.start()
-
-
-def unlock_keyboard() -> None:
-    """Restore keyboard input."""
-    global _kb_listener
-    with _kb_lock:
-        if _kb_listener is None:
-            return
-        _kb_listener.stop()
-        _kb_listener = None
-
-
-def take_hostage(health_score: int) -> None:
-    """Hide a fun app if health is critically low."""
-    if health_score >= 30:
-        return
-    get_app = (
-        'tell application "System Events" to get name of first process '
-        'whose frontmost is true'
-    )
-    result = subprocess.run(
-        ["osascript", "-e", get_app], capture_output=True, text=True
-    )
-    app = result.stdout.strip()
-    if app in _HOSTAGE_APPS:
-        subprocess.run(
-            ["osascript", "-e", f'tell application "{app}" to set visible to false'],
+        target=lambda: subprocess.run(
+            ["say", "-v", "Daniel", safe],
             check=False,
+        ),
+        daemon=True,
+    ).start()
+
+
+def play_sound_if_exists(filename: str) -> None:
+    """Play an MP3 from ./sounds if present (non-blocking)."""
+    path = SOUNDS_DIR / filename
+    if not path.is_file():
+        return
+
+    def _play() -> None:
+        subprocess.run(["afplay", str(path)], check=False)
+
+    threading.Thread(target=_play, daemon=True).start()
+
+
+def hide_hostage_apps() -> None:
+    """Level 30 — hide Spotify, Discord, and YouTube via AppleScript."""
+    for app in ("Spotify", "Discord", "YouTube"):
+        _run_applescript(
+            f'tell application "{app}" to if running then set visible to false'
         )
-        shame_user("No music for raisins. Drink up.")
 
 
-def post_to_x(message: str) -> None:
-    """Open a browser to x.com/intent/tweet so the user must manually post their confession."""
-    import urllib.parse
-    url = "https://x.com/intent/tweet?text=" + urllib.parse.quote(message)
-    os.system(f"open '{url}'")
+def post_drought_slack(webhook_url: str | None = None) -> None:
+    """Level 0 — post drought / dehydration alert to Slack."""
+    url = webhook_url or SLACK_WEBHOOK_URL
+    if "PLACEHOLDER" in url:
+        return
+
+    payload = json.dumps(
+        {
+            "text": (
+                "DEHYDRATION ALERT: The Narc reports critical drought. "
+                "The subject has hit health 0. Hydrate immediately."
+            )
+        }
+    ).encode()
+
+    def _post() -> None:
+        req = urllib.request.Request(
+            url,
+            data=payload,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        try:
+            urllib.request.urlopen(req, timeout=10)
+        except OSError:
+            pass
+
+    threading.Thread(target=_post, daemon=True).start()
 
 
-def mouse_jitter(iterations: int = 5, magnitude: int = 40) -> None:
-    """Rapidly jitter the mouse cursor to annoy the user."""
-    x, y = pyautogui.position()
-    for _ in range(iterations):
-        dx = random.randint(-magnitude, magnitude)
-        dy = random.randint(-magnitude, magnitude)
-        pyautogui.moveTo(x + dx, y + dy, duration=0.05)
-    pyautogui.moveTo(x, y, duration=0.1)
+def nuclear_sleep() -> None:
+    """Put the Mac to sleep (System Events)."""
+    _run_applescript('tell application "System Events" to sleep')
+
+
+def rickroll_full_volume() -> None:
+    """Finale — system volume max, then Rickroll (browser)."""
+    _run_applescript("set volume output volume 100")
+    rick = SOUNDS_DIR / "rickroll.mp3"
+    if rick.is_file():
+        subprocess.Popen(["afplay", str(rick)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    else:
+        subprocess.Popen(
+            ["open", _RICKROLL_URL],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )

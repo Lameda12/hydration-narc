@@ -1,13 +1,9 @@
 [project]
 name = "hydration-narc"
-version = "0.1.0"
-description = "Add your description here"
-readme = "README.md"
-requires-python = ">=3.13"
+version = "0.2.0"
+description = "Vision-based macOS hydration enforcer (MediaPipe + threat automation)."
+requires-python = ">=3.11"
 dependencies = [
-    "mediapipe>=0.10.33",
-    "opencv-python>=4.13.0.92",
-    "pyautogui>=0.9.54",
-    "pyinstaller>=6.19.0",
-    "pynput>=1.8.1",
+    "mediapipe>=0.10.14",
+    "opencv-python>=4.9.0.80",
 ]
