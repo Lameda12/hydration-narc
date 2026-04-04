@@ -10,7 +10,7 @@ if [[ -f "$PID_FILE" ]] && kill -0 "$(cat "$PID_FILE")" 2>/dev/null; then
 fi
 
 cd "$SCRIPT_DIR"
-nohup uv run python "$SCRIPT_DIR/narc.py" \
+nohup uv run python "$SCRIPT_DIR/main.py" \
   >"$SCRIPT_DIR/narc.log" 2>&1 </dev/null &
 
 echo $! >"$PID_FILE"

@@ -20,31 +20,29 @@ SOUNDS_DIR = _REPO_ROOT / "sounds"
 
 _RICKROLL_URL = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 
+# Track running sound processes per slot to prevent audio stacking
+_sound_procs: dict[str, subprocess.Popen] = {}
+
 
 def _run_applescript(source: str) -> None:
     subprocess.run(["osascript", "-e", source], check=False, capture_output=True)
 
 
-def warn_observed_daniel(message: str) -> None:
-    """Level 75 — audio warning via macOS `say` (Daniel voice)."""
-    safe = message.replace('"', "").replace("'", "")
-    threading.Thread(
-        target=lambda: subprocess.run(
-            ["say", "-v", "Daniel", safe],
-            check=False,
-        ),
-        daemon=True,
-    ).start()
-
-
-def play_sound_if_exists(filename: str) -> None:
-    """Play an MP3 from ./sounds if present (non-blocking)."""
+def play_sound_if_exists(filename: str, slot: str | None = None) -> None:
+    """Play an MP3 from ./sounds if present (non-blocking, deduplicated by slot)."""
     path = SOUNDS_DIR / filename
     if not path.is_file():
         return
 
+    key = slot or filename
+    prev = _sound_procs.get(key)
+    if prev and prev.poll() is None:
+        # Previous process for this slot still running, skip to avoid stacking
+        return
+
     def _play() -> None:
-        subprocess.run(["afplay", str(path)], check=False)
+        proc = subprocess.Popen(["afplay", str(path)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        _sound_procs[key] = proc
 
     threading.Thread(target=_play, daemon=True).start()
 
@@ -93,11 +91,11 @@ def nuclear_sleep() -> None:
 
 
 def rickroll_full_volume() -> None:
-    """Finale — system volume max, then Rickroll (browser)."""
+    """Finale — system volume max, then Rickroll (file or browser)."""
     _run_applescript("set volume output volume 100")
     rick = SOUNDS_DIR / "rickroll.mp3"
     if rick.is_file():
-        subprocess.Popen(["afplay", str(rick)], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        play_sound_if_exists("rickroll.mp3", slot="rickroll")
     else:
         subprocess.Popen(
             ["open", _RICKROLL_URL],

@@ -125,8 +125,14 @@ class TrackpadWitness(_NullWitness):
                 NSEventMaskPressure,
             )
 
-            NSApplication = __import__("AppKit", fromlist=["NSApplication"]).NSApplication
-            NSApplication.sharedApplication()
+            try:
+                NSApplication = __import__("AppKit", fromlist=["NSApplication"]).NSApplication
+                NSApplication.sharedApplication()
+            except Exception as ns_err:
+                self.available = False
+                self.reason = f"NSApplication initialization failed: {ns_err}"
+                print(f"[narc] Trackpad Witness: {self.reason}")
+                return
 
             mask = (
                 NSEventMaskLeftMouseDown

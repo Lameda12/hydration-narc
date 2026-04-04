@@ -129,10 +129,15 @@ def preferred_opencv_indices() -> list[int]:
 
 
 def open_preferred_capture() -> cv2.VideoCapture:
-    """Open the first working capture device, preferring built-in FaceTime on macOS."""
+    """Open the first working capture device, preferring built-in FaceTime on macOS.
+
+    Falls back to indices 0, 1, 2 if preferred candidates fail.
+    """
     backend = cv2.CAP_AVFOUNDATION if sys.platform == "darwin" else 0
     last: cv2.VideoCapture | None = None
-    for idx in preferred_opencv_indices():
+    indices = preferred_opencv_indices()
+
+    for idx in indices:
         cap = cv2.VideoCapture(idx, backend) if backend else cv2.VideoCapture(idx)
         last = cap
         if not cap.isOpened():
@@ -143,6 +148,20 @@ def open_preferred_capture() -> cv2.VideoCapture:
             print(f"[narc] Camera OpenCV index {idx} (backend={'AVFoundation' if backend else 'default'})")
             return cap
         cap.release()
-    if last is not None and last.isOpened():
-        return last
+
+    # Fallback cycle through indices 0, 1, 2 if preferred indices exhausted.
+    print("[narc] Preferred indices failed, cycling through fallback indices 0, 1, 2...")
+    for fallback_idx in [0, 1, 2]:
+        cap = cv2.VideoCapture(fallback_idx, backend) if backend else cv2.VideoCapture(fallback_idx)
+        if not cap.isOpened():
+            cap.release()
+            continue
+        ok, _ = cap.read()
+        if ok:
+            print(f"[narc] Fallback: Camera OpenCV index {fallback_idx} opened successfully")
+            return cap
+        cap.release()
+
+    # Final fallback: return index 0 regardless of state.
+    print("[narc] All fallbacks exhausted, returning index 0")
     return cv2.VideoCapture(0, backend) if backend else cv2.VideoCapture(0)
