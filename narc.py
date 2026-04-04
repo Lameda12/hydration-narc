@@ -19,7 +19,15 @@ from actions import (
     rickroll_full_volume,
     warn_observed_daniel,
 )
+from camera_pick import open_preferred_capture
 from ledger import log_mortal_sin, log_sip
+from trackpad_witness import (
+    PRESSURE_FLOOR,
+    WITNESS_CLICKS_ALONE_TARGET,
+    WITNESS_PRESSURE_INTEGRAL_TARGET,
+    WITNESS_WINDOW_SEC,
+    create_witness,
+)
 
 # ── Tuning ───────────────────────────────────────────────────────────────────
 DECAY_INTERVAL_SEC = 60
@@ -118,6 +126,43 @@ class SipDetector:
         else:
             self._sip_start = None
         return False
+
+    def reset(self) -> None:
+        self._sip_start = None
+
+
+def _draw_witness_bar(
+    frame,
+    y_top: int,
+    fill: float,
+    active: bool,
+    witness_enabled: bool,
+) -> None:
+    """Horizontal bar next to HUD region (substrate attestation)."""
+    x0, x1 = 20, 220
+    h = 18
+    cv2.rectangle(frame, (x0, y_top), (x1, y_top + h), (45, 45, 48), -1)
+    inner_w = x1 - x0 - 4
+    fw = int(inner_w * max(0.0, min(1.0, fill)))
+    if fw > 0:
+        col = (0, 220, 255) if active else (80, 80, 80)
+        if active and fill >= 1.0:
+            col = (0, 255, 120)
+        cv2.rectangle(frame, (x0 + 2, y_top + 2), (x0 + 2 + fw, y_top + h - 2), col, -1)
+    cv2.rectangle(frame, (x0, y_top), (x1, y_top + h), (120, 120, 120), 1)
+    if witness_enabled:
+        label = "Trackpad Witness: ATTEST" if active else "Trackpad Witness: idle"
+    else:
+        label = "Trackpad Witness: off (no Accessibility / not macOS)"
+    cv2.putText(
+        frame,
+        label,
+        (x0, y_top - 6),
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.5,
+        (200, 200, 200),
+        1,
+    )
 
 
 class HealthScore:
@@ -231,96 +276,181 @@ def run() -> None:
         min_tracking_confidence=0.6,
     )
 
-    cap = cv2.VideoCapture(0)
+    cap = open_preferred_capture()
     health = HealthScore()
     sip = SipDetector()
+    witness = create_witness()
     last_loop_t = time.time()
     frame_ms = 0
 
-    with vision.FaceLandmarker.create_from_options(face_options) as face_lm:
-        with vision.HandLandmarker.create_from_options(hand_options) as hand_lm:
-            while cap.isOpened():
-                now = time.time()
-                gap = now - last_loop_t
-                last_loop_t = now
+    witness_deadline: float | None = None
+    witness_pressure_integral = 0.0
+    witness_clicks = 0
+    pending_smile = 0.0
 
-                ok, frame = cap.read()
-                if not ok:
-                    break
+    try:
+        with vision.FaceLandmarker.create_from_options(face_options) as face_lm:
+            with vision.HandLandmarker.create_from_options(hand_options) as hand_lm:
+                while cap.isOpened():
+                    now = time.time()
+                    dt_loop = now - last_loop_t
+                    gap = dt_loop
+                    last_loop_t = now
 
-                frame = cv2.flip(frame, 1)
-                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
-                h, w = frame.shape[:2]
+                    ok, frame = cap.read()
+                    if not ok:
+                        break
 
-                frame_ms += 33
-                mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
+                    frame = cv2.flip(frame, 1)
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    h, w = frame.shape[:2]
 
-                face_res = face_lm.detect_for_video(mp_image, frame_ms)
-                hand_res = hand_lm.detect_for_video(mp_image, frame_ms)
+                    frame_ms += 33
+                    mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb)
 
-                faces = face_res.face_landmarks
-                hands = hand_res.hand_landmarks
+                    face_res = face_lm.detect_for_video(mp_image, frame_ms)
+                    hand_res = hand_lm.detect_for_video(mp_image, frame_ms)
 
-                near = _is_hand_near_mouth(hands, faces, w, h)
-                smile_ratio = _smile_spread_ratio(faces, w, h)
+                    faces = face_res.face_landmarks
+                    hands = hand_res.hand_landmarks
 
-                if sip.update(near):
-                    if smile_ratio >= SMILE_THRESHOLD:
-                        play_sound_if_exists("sip_success.mp3")
-                        health.apply_full_compliance(smile_ratio)
+                    near = _is_hand_near_mouth(hands, faces, w, h)
+                    smile_ratio = _smile_spread_ratio(faces, w, h)
+
+                    witness_fill = 0.0
+                    witness_active = witness_deadline is not None
+
+                    if witness_deadline is not None:
+                        if now > witness_deadline:
+                            witness.set_armed(False)
+                            witness_deadline = None
+                            witness_pressure_integral = 0.0
+                            witness_clicks = 0
+                            warn_observed_daniel(
+                                "The witness surface timed out. Dock the vessel on the trackpad — "
+                                "firm press or three clicks."
+                            )
+                            log_sip(pending_smile, False)
+                        else:
+                            p = witness.read_pressure()
+                            witness_clicks += witness.take_click_delta()
+                            witness_pressure_integral += dt_loop * max(0.0, p - PRESSURE_FLOOR)
+                            ok_force = (
+                                witness_pressure_integral >= WITNESS_PRESSURE_INTEGRAL_TARGET
+                            )
+                            ok_click = witness_clicks >= WITNESS_CLICKS_ALONE_TARGET
+                            f_pi = min(
+                                1.0,
+                                witness_pressure_integral / WITNESS_PRESSURE_INTEGRAL_TARGET,
+                            )
+                            f_cl = min(1.0, witness_clicks / WITNESS_CLICKS_ALONE_TARGET)
+                            witness_fill = max(f_pi, f_cl)
+                            if ok_force or ok_click:
+                                witness.set_armed(False)
+                                witness_deadline = None
+                                witness_pressure_integral = 0.0
+                                witness_clicks = 0
+                                play_sound_if_exists("sip_success.mp3")
+                                health.apply_full_compliance(pending_smile)
+                                witness_fill = 1.0
+
+                    if witness_deadline is None:
+                        if sip.update(near):
+                            if smile_ratio >= SMILE_THRESHOLD:
+                                if getattr(witness, "available", False):
+                                    witness_deadline = now + WITNESS_WINDOW_SEC
+                                    witness_pressure_integral = 0.0
+                                    witness_clicks = 0
+                                    pending_smile = smile_ratio
+                                    witness.set_armed(True)
+                                    warn_observed_daniel(
+                                        "Ocular compliance noted. Attest on the trackpad — "
+                                        "force press or three clicks."
+                                    )
+                                else:
+                                    play_sound_if_exists("sip_success.mp3")
+                                    health.apply_full_compliance(smile_ratio)
+                            else:
+                                warn_observed_daniel(
+                                    "That is not full compliance. Smile while you drink — "
+                                    "spread at least point two eight."
+                                )
+                                play_sound_if_exists("sip_fail.mp3")
+                                log_sip(smile_ratio, False)
                     else:
-                        warn_observed_daniel(
-                            "That is not full compliance. Smile while you drink — "
-                            "spread at least point two eight."
-                        )
-                        play_sound_if_exists("sip_fail.mp3")
-                        log_sip(smile_ratio, False)
+                        sip.reset()
 
-                score = health.tick(now, gap)
+                    score = health.tick(now, gap)
 
-                color = (0, 200, 0) if score > THREAT_OBSERVED else (0, 165, 255)
-                if score <= THREAT_HOSTAGE:
-                    color = (0, 140, 255)
-                if score == 0:
-                    color = (0, 0, 255)
+                    color = (0, 200, 0) if score > THREAT_OBSERVED else (0, 165, 255)
+                    if score <= THREAT_HOSTAGE:
+                        color = (0, 140, 255)
+                    if score == 0:
+                        color = (0, 0, 255)
 
-                cv2.putText(
-                    frame,
-                    f"Health: {score}",
-                    (20, 40),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    1.2,
-                    color,
-                    2,
-                )
-                cv2.putText(
-                    frame,
-                    f"Smile S: {smile_ratio:.2f} (need >= {SMILE_THRESHOLD})",
-                    (20, 80),
-                    cv2.FONT_HERSHEY_SIMPLEX,
-                    0.6,
-                    (200, 200, 200),
-                    1,
-                )
-                if near:
-                    msg = (
-                        "SIP — smile for compliance"
-                        if smile_ratio < SMILE_THRESHOLD
-                        else "SIP + SMILE OK"
-                    )
                     cv2.putText(
                         frame,
-                        msg,
-                        (20, 115),
+                        f"Health: {score}",
+                        (20, 40),
                         cv2.FONT_HERSHEY_SIMPLEX,
-                        0.65,
-                        (0, 255, 255),
+                        1.2,
+                        color,
                         2,
                     )
+                    bar_y = 52
+                    bar_w = max(1, int(2.0 * score))
+                    cv2.rectangle(frame, (20, bar_y), (220, bar_y + 8), (40, 40, 40), -1)
+                    cv2.rectangle(frame, (20, bar_y), (20 + bar_w, bar_y + 8), color, -1)
 
-                cv2.imshow("Hydration Narc", frame)
-                if cv2.waitKey(1) & 0xFF == ord("q"):
-                    break
+                    cv2.putText(
+                        frame,
+                        f"Smile S: {smile_ratio:.2f} (need >= {SMILE_THRESHOLD})",
+                        (20, 78),
+                        cv2.FONT_HERSHEY_SIMPLEX,
+                        0.6,
+                        (200, 200, 200),
+                        1,
+                    )
+                    if near:
+                        msg = (
+                            "SIP — smile for compliance"
+                            if smile_ratio < SMILE_THRESHOLD
+                            else "SIP + SMILE OK — then trackpad"
+                        )
+                        cv2.putText(
+                            frame,
+                            msg,
+                            (20, 108),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.65,
+                            (0, 255, 255),
+                            2,
+                        )
+
+                    _draw_witness_bar(
+                        frame,
+                        128,
+                        witness_fill if witness_active else 0.0,
+                        witness_active,
+                        bool(getattr(witness, "available", False)),
+                    )
+                    if witness_active:
+                        cv2.putText(
+                            frame,
+                            f"P:{witness.read_pressure():.2f} clk:{witness_clicks}",
+                            (20, 158),
+                            cv2.FONT_HERSHEY_SIMPLEX,
+                            0.45,
+                            (180, 180, 180),
+                            1,
+                        )
+
+                    cv2.imshow("Hydration Narc", frame)
+                    if cv2.waitKey(1) & 0xFF == ord("q"):
+                        break
+
+    finally:
+        witness.stop()
 
     cap.release()
     cv2.destroyAllWindows()

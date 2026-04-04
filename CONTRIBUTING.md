@@ -19,7 +19,8 @@ The Hydration Narc is built on a shared belief: people will not drink water unle
 | Area | File | Notes |
 |------|------|--------|
 | Threat actions | `actions.py` | `say`, Slack, hide apps, sleep, Rickroll |
-| Health / decay / nuclear | `narc.py` | `HealthScore`, sip detector, MediaPipe loop |
+| Health / decay / nuclear | `narc.py` | `HealthScore`, sip detector, witness gate, MediaPipe loop |
+| Trackpad Witness | `trackpad_witness.py` | macOS-only `NSEvent` global monitor (Accessibility); constants at top |
 | Ledger | `ledger.py` | Append-only JSON, threaded writes |
 
 To add a consequence at a given score, extend **`HealthScore`** in `narc.py` (e.g. in `_on_decay_level` or the `score == 0` block) and implement the side effect in **`actions.py`**. Use **non-blocking** calls (threads or detached processes) so the camera loop stays responsive.

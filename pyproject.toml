@@ -1,10 +1,12 @@
 [project]
 name = "hydration-narc"
-version = "0.2.0"
+version = "0.3.0"
 description = "Vision-based macOS hydration enforcer (MediaPipe + threat automation)."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "mediapipe>=0.10.14",
     "opencv-python>=4.9.0.80",
+    "pyobjc-framework-Cocoa>=10.0; sys_platform == 'darwin'",
+    "pyobjc-framework-AVFoundation>=10.0; sys_platform == 'darwin'",
 ]
